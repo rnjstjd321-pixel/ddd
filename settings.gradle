@@ -1,0 +1,2 @@
+rootProject.name = 'order-msa-assignment'
+include 'order-service', 'product-service', 'payment-service'
