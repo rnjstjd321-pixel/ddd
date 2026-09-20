@@ -1,4 +1,4 @@
-package com.example.payment.presentation.dto;
+package com.example.payment.adapter.in.web.dto;
 
 import com.example.payment.application.dto.ApprovePaymentCommand;
 

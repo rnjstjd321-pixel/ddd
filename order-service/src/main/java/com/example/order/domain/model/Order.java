@@ -1,5 +1,6 @@
 package com.example.order.domain.model;
 
+import com.example.order.domain.event.OrderCancelled;
 import com.example.order.domain.event.OrderPlaced;
 import com.example.order.domain.exception.InvalidOrderStateException;
 import jakarta.persistence.AttributeOverride;
@@ -84,7 +85,13 @@ public class Order {
     }
 
     public OrderPlaced placedEvent() {
-        return new OrderPlaced(id, totalAmount);
+        OrderLine line = firstLine();
+        return new OrderPlaced(id, line.getProductId(), line.getQuantity(), totalAmount);
+    }
+
+    public OrderCancelled cancelledEvent(boolean wasPaid) {
+        OrderLine line = firstLine();
+        return new OrderCancelled(id, line.getProductId(), line.getQuantity(), wasPaid);
     }
 
     public Long getId() {

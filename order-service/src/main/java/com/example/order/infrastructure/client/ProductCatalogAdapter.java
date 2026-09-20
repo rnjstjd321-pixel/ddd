@@ -34,30 +34,4 @@ public class ProductCatalogAdapter implements ProductCatalogPort {
             throw new ProductUnavailableException(productId);
         }
     }
-
-    @Override
-    public void decreaseStock(Long productId, int quantity) {
-        try {
-            restClient.post()
-                    .uri(productUrl + "/api/products/" + productId
-                            + "/decrease-stock?quantity=" + quantity)
-                    .retrieve()
-                    .toBodilessEntity();
-        } catch (RestClientException e) {
-            throw new ProductUnavailableException(productId);
-        }
-    }
-
-    @Override
-    public void increaseStock(Long productId, int quantity) {
-        try {
-            restClient.post()
-                    .uri(productUrl + "/api/products/" + productId
-                            + "/increase-stock?quantity=" + quantity)
-                    .retrieve()
-                    .toBodilessEntity();
-        } catch (RestClientException e) {
-            throw new ProductUnavailableException(productId);
-        }
-    }
 }

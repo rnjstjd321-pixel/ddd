@@ -15,9 +15,27 @@ spring:
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      group-id: order-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 services:
   product:
     url: ${SERVICES_PRODUCT_URL:http://localhost:8081}
-  payment:
-    url: ${SERVICES_PAYMENT_URL:http://localhost:8082}
+
+app:
+  kafka:
+    topics:
+      order-placed: order.placed
+      order-cancelled: order.cancelled
+      stock-deducted: stock.deducted
+      stock-deduct-failed: stock.deduct.failed
+      payment-approved: payment.approved
+      payment-failed: payment.failed

@@ -1,6 +1,5 @@
 package com.example.order.presentation.exception;
 
-import com.example.order.application.exception.PaymentApprovalFailedException;
 import com.example.order.application.exception.ProductUnavailableException;
 import com.example.order.domain.exception.InvalidOrderStateException;
 import com.example.order.domain.exception.OrderNotFoundException;
@@ -21,7 +20,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({
             InvalidOrderStateException.class,
             ProductUnavailableException.class,
-            PaymentApprovalFailedException.class,
             IllegalArgumentException.class
     })
     @ResponseStatus(HttpStatus.BAD_REQUEST)

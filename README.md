@@ -75,16 +75,17 @@ com.example.order
 │   └── OrderController
 ├── application
 │   ├── service.OrderApplicationService
-│   └── port.ProductCatalogPort / PaymentGatewayPort
+│   └── port.ProductCatalogPort
 ├── domain
 │   ├── model.Order (Aggregate Root)
 │   ├── model.OrderLine / Money / ProductSnapshot (VO)
-│   ├── event.OrderPlaced
+│   ├── event.OrderPlaced / OrderCancelled
 │   ├── service.PlaceOrderService
 │   └── repository.OrderRepository
 └── infrastructure
     ├── persistence.OrderRepositoryAdapter
-    └── client.ProductCatalogAdapter / PaymentGatewayAdapter
+    ├── client.ProductCatalogAdapter
+    └── event.KafkaDomainEventPublisher / messaging listeners
 ```
 
 ### 핵심 도메인 모델
@@ -120,30 +121,36 @@ Client
   v
 Order Application Service
   |
-  | 1. 상품 존재/재고 확인
-  v
-Product Context (Port)
-  |
-  | 2. 재고 차감
+  | 1. 상품 조회 (동기 REST)
   v
 Product Context
   |
-  | 3. PlaceOrderService: Order.create() + addLine() 저장, OrderPlaced 발행
+  | 2. Order 저장(CREATED) + order.placed 발행
   v
-Order Aggregate
+Kafka
   |
-  | 4. 결제 승인
+  | 3. 재고 차감 → stock.deducted
   v
-Payment Context (Port)
+Product Context
+  |
+  | 4. 결제 승인 → payment.approved
+  v
+Payment Context
   |
   | 5. Order.markPaid()
   v
 Order -> PAID
 ```
 
-실제 운영 환경에서는 분산 트랜잭션 대신 Saga / Outbox / 이벤트 기반 보상 처리를 적용할 수 있습니다.
+주문 생성 API는 `CREATED` 상태로 바로 응답하고, 결제 완료는 Kafka를 통해 비동기로 `PAID`로 반영됩니다.
+조회(`GET /api/orders/{id}`)로 최종 상태를 확인하면 됩니다.
 
-이 과제에서는 **서비스 경계와 도메인 책임 분리**를 명확하게 보여주는 것에 집중했습니다.
+Kafka 토픽:
+- `order.placed` / `order.cancelled`
+- `stock.deducted` / `stock.deduct.failed`
+- `payment.approved` / `payment.failed`
+
+실제 운영 환경에서는 Outbox Pattern과 멱등 소비를 함께 적용하는 것이 좋습니다.
 
 ## 5. 실행
 
@@ -157,11 +164,13 @@ Order -> PAID
 
 공통 계정: `postgres` / `postgres`
 
-### 1) PostgreSQL만 실행 (로컬 bootRun용)
+### 1) PostgreSQL + Kafka 실행 (로컬 bootRun용)
 
 ```bash
-docker compose up -d order-db product-db payment-db
+docker compose up -d order-db product-db payment-db kafka
 ```
+
+Kafka는 `localhost:9092`로 연결됩니다.
 
 그다음 서비스를 독립 실행합니다.
 
@@ -253,15 +262,14 @@ POST http://localhost:8080/api/orders/1/cancel
 
 운영 수준으로 발전시킨다면 다음을 적용할 수 있습니다.
 
-1. REST 동기 호출 의존성 감소
-2. Kafka 기반 OrderCreated / PaymentCompleted 이벤트
-3. Outbox Pattern
-4. Saga Pattern 및 보상 트랜잭션
-5. Redis 기반 상품/재고 조회 캐시
-6. Spring Cloud Gateway
-7. Kubernetes Deployment/Service
-8. OpenTelemetry + Prometheus/Grafana
-9. API timeout/retry/circuit breaker
+1. REST 동기 호출 의존성 감소 (상품 조회만 REST, 재고/결제는 Kafka)
+2. Outbox Pattern
+3. Saga Pattern 및 보상 트랜잭션 고도화
+4. Redis 기반 상품/재고 조회 캐시
+5. Spring Cloud Gateway
+6. Kubernetes Deployment/Service
+7. OpenTelemetry + Prometheus/Grafana
+8. API timeout/retry/circuit breaker
 
 ## 9. 제출 시 설명할 핵심
 

@@ -1,4 +1,4 @@
-package com.example.payment.presentation.exception;
+package com.example.payment.adapter.in.web.exception;
 
 import com.example.payment.domain.exception.InvalidPaymentStateException;
 import com.example.payment.domain.exception.PaymentNotFoundException;

@@ -2,12 +2,12 @@ package com.example.order.application.service;
 
 import com.example.order.application.dto.CreateOrderCommand;
 import com.example.order.application.dto.OrderResponse;
-import com.example.order.application.exception.PaymentApprovalFailedException;
-import com.example.order.application.port.PaymentGatewayPort;
 import com.example.order.application.port.ProductCatalogPort;
+import com.example.order.domain.event.DomainEventPublisher;
 import com.example.order.domain.exception.OrderNotFoundException;
 import com.example.order.domain.model.Money;
 import com.example.order.domain.model.Order;
+import com.example.order.domain.model.OrderStatus;
 import com.example.order.domain.model.ProductSnapshot;
 import com.example.order.domain.repository.OrderRepository;
 import com.example.order.domain.service.PlaceOrderService;
@@ -18,8 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 애플리케이션 서비스.
- * 상품/결제 같은 다른 컨텍스트 연동만 조율하고,
- * 주문 생성 규칙과 이벤트 발행은 PlaceOrderService / Order Aggregate에 맡긴다.
+ * 상품 조회만 동기 REST로 하고, 재고/결제는 Kafka 이벤트로 비동기 처리한다.
  */
 @Service
 @Transactional
@@ -27,24 +26,22 @@ public class OrderApplicationService {
     private final OrderRepository orderRepository;
     private final PlaceOrderService placeOrderService;
     private final ProductCatalogPort productCatalogPort;
-    private final PaymentGatewayPort paymentGatewayPort;
+    private final DomainEventPublisher domainEventPublisher;
 
     public OrderApplicationService(
             OrderRepository orderRepository,
             PlaceOrderService placeOrderService,
             ProductCatalogPort productCatalogPort,
-            PaymentGatewayPort paymentGatewayPort) {
+            DomainEventPublisher domainEventPublisher) {
         this.orderRepository = orderRepository;
         this.placeOrderService = placeOrderService;
         this.productCatalogPort = productCatalogPort;
-        this.paymentGatewayPort = paymentGatewayPort;
+        this.domainEventPublisher = domainEventPublisher;
     }
 
     public OrderResponse createOrder(CreateOrderCommand command) {
         ProductCatalogPort.ProductInfo product = productCatalogPort.getProduct(command.productId());
-        productCatalogPort.decreaseStock(command.productId(), command.quantity());
 
-        // 도메인 서비스가 Aggregate를 만들고 OrderPlaced 이벤트를 발행한다.
         Order order = placeOrderService.place(List.of(
                 new OrderLineRequest(
                         new ProductSnapshot(product.id(), product.name(), Money.krw(product.price())),
@@ -52,16 +49,7 @@ public class OrderApplicationService {
                 )
         ));
 
-        PaymentGatewayPort.PaymentResult payment = paymentGatewayPort.approve(
-                order.getId(),
-                order.totalAmount().toLong()
-        );
-        if (!payment.isPaid()) {
-            throw new PaymentApprovalFailedException();
-        }
-
-        order.markPaid();
-        return OrderResponse.from(orderRepository.save(order));
+        return OrderResponse.from(order);
     }
 
     @Transactional(readOnly = true)
@@ -72,17 +60,37 @@ public class OrderApplicationService {
     public OrderResponse cancelOrder(Long orderId) {
         Order order = findOrder(orderId);
         boolean wasPaid = order.isPaid();
-        Long productId = order.firstLine().getProductId();
-        int quantity = order.firstLine().getQuantity();
-
         order.cancel();
-
-        productCatalogPort.increaseStock(productId, quantity);
-        if (wasPaid) {
-            paymentGatewayPort.cancelByOrderId(orderId);
-        }
-
+        domainEventPublisher.publish(order.cancelledEvent(wasPaid));
         return OrderResponse.from(orderRepository.save(order));
+    }
+
+    public void markOrderPaid(Long orderId) {
+        Order order = findOrder(orderId);
+        if (order.getStatus() != OrderStatus.CREATED) {
+            return;
+        }
+        order.markPaid();
+        orderRepository.save(order);
+    }
+
+    public void failOrderAfterStockFailure(Long orderId) {
+        Order order = findOrder(orderId);
+        if (order.getStatus() == OrderStatus.CANCELLED) {
+            return;
+        }
+        order.cancel();
+        orderRepository.save(order);
+    }
+
+    public void failOrderAfterPaymentFailure(Long orderId) {
+        Order order = findOrder(orderId);
+        if (order.getStatus() == OrderStatus.CANCELLED) {
+            return;
+        }
+        order.cancel();
+        domainEventPublisher.publish(order.cancelledEvent(false));
+        orderRepository.save(order);
     }
 
     private Order findOrder(Long orderId) {

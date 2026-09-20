@@ -2,30 +2,37 @@ package com.example.payment.application.service;
 
 import com.example.payment.application.dto.ApprovePaymentCommand;
 import com.example.payment.application.dto.PaymentResponse;
+import com.example.payment.application.port.in.PaymentUseCase;
+import com.example.payment.application.port.out.PaymentRepositoryPort;
 import com.example.payment.domain.exception.PaymentNotFoundException;
 import com.example.payment.domain.model.Payment;
-import com.example.payment.domain.repository.PaymentRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 애플리케이션 서비스.
- * Payment Aggregate Root를 조회/저장만 하고, 취소 규칙은 payment.cancel()에 위임한다.
+ * 애플리케이션 서비스(유스케이스 구현).
+ * Inbound Port를 구현하고, Outbound Port만 의존한다.
  */
 @Service
 @Transactional
-public class PaymentApplicationService {
-    private final PaymentRepository paymentRepository;
+public class PaymentApplicationService implements PaymentUseCase {
+    private final PaymentRepositoryPort paymentRepository;
 
-    public PaymentApplicationService(PaymentRepository paymentRepository) {
+    public PaymentApplicationService(PaymentRepositoryPort paymentRepository) {
         this.paymentRepository = paymentRepository;
     }
 
+    @Override
     public PaymentResponse createPayment(ApprovePaymentCommand command) {
-        Payment payment = Payment.approve(command.orderId(), command.amount());
-        return PaymentResponse.from(paymentRepository.save(payment));
+        return paymentRepository.findByOrderId(command.orderId())
+                .map(PaymentResponse::from)
+                .orElseGet(() -> {
+                    Payment payment = Payment.approve(command.orderId(), command.amount());
+                    return PaymentResponse.from(paymentRepository.save(payment));
+                });
     }
 
+    @Override
     @Transactional(readOnly = true)
     public PaymentResponse getPayment(Long paymentId) {
         Payment payment = paymentRepository.findById(paymentId)
@@ -33,6 +40,7 @@ public class PaymentApplicationService {
         return PaymentResponse.from(payment);
     }
 
+    @Override
     public PaymentResponse cancelPayment(Long orderId) {
         Payment payment = paymentRepository.findByOrderId(orderId)
                 .orElseThrow(() -> new PaymentNotFoundException("Payment not found for order: " + orderId));

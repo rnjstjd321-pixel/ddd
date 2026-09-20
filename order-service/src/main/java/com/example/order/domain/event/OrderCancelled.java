@@ -1,24 +1,23 @@
 package com.example.order.domain.event;
 
-import com.example.order.domain.model.Money;
 import java.time.Instant;
 
 /**
  * 도메인 이벤트(Domain Event).
- * 주문이 생성된 사실과 결제/재고 처리에 필요한 최소 정보를 담는다.
+ * 주문이 취소된 사실을 기록해 재고 복구/결제 취소를 유도한다.
  */
-public final class OrderPlaced {
+public final class OrderCancelled {
     private final Long orderId;
     private final Long productId;
     private final int quantity;
-    private final Money total;
+    private final boolean wasPaid;
     private final Instant occurredAt = Instant.now();
 
-    public OrderPlaced(Long orderId, Long productId, int quantity, Money total) {
+    public OrderCancelled(Long orderId, Long productId, int quantity, boolean wasPaid) {
         this.orderId = orderId;
         this.productId = productId;
         this.quantity = quantity;
-        this.total = total;
+        this.wasPaid = wasPaid;
     }
 
     public Long orderId() {
@@ -33,8 +32,8 @@ public final class OrderPlaced {
         return quantity;
     }
 
-    public Money total() {
-        return total;
+    public boolean wasPaid() {
+        return wasPaid;
     }
 
     public Instant occurredAt() {
