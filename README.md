@@ -263,13 +263,7 @@ POST http://localhost:8080/api/orders/1/cancel
 운영 수준으로 발전시킨다면 다음을 적용할 수 있습니다.
 
 1. REST 동기 호출 의존성 감소 (상품 조회만 REST, 재고/결제는 Kafka)
-2. Outbox Pattern
-3. Saga Pattern 및 보상 트랜잭션 고도화
-4. Redis 기반 상품/재고 조회 캐시
-5. Spring Cloud Gateway
-6. Kubernetes Deployment/Service
-7. OpenTelemetry + Prometheus/Grafana
-8. API timeout/retry/circuit breaker
+2. Saga Pattern 및 보상 트랜잭션 고도화
 
 ## 9. 제출 시 설명할 핵심
 
