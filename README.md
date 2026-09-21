@@ -53,40 +53,61 @@
 **소유 데이터**
 - payments
 
-## 2. DDD 계층
+## 2. DDD + 헥사고날(Ports & Adapters) 구조
 
-각 서비스는 동일한 4계층을 가집니다.
+각 서비스는 동일한 구조를 가집니다. 헥사고날은 **in(들어오는 쪽)과 out(나가는 쪽)** 을 분리하는 것이 핵심이라, 포트와 어댑터 모두 `in` / `out`으로 나눕니다.
 
 ```text
-presentation     Controller, Request DTO, Exception Handler
-application      Application Service, Command, Port
-domain           Aggregate, Entity, Value Object, Domain Exception, Repository 인터페이스
-infrastructure   JPA Adapter, REST Adapter
+domain           Aggregate, Entity, Value Object, Domain Event, Domain Service, Domain Exception
+application
+  ├─ port.in     Inbound Port  : 유스케이스 인터페이스 (웹/메시징이 호출)
+  ├─ port.out    Outbound Port : Repository, 이벤트 발행, 외부 서비스 조회 인터페이스
+  ├─ service     유스케이스 구현 (port.in 구현, port.out 사용)
+  └─ dto         Command / Response
+adapter
+  ├─ in.web        REST Controller, Request DTO, Exception Handler   -> port.in 호출
+  ├─ in.messaging  Kafka Listener, 수신 메시지                        -> port.in 호출
+  ├─ out.persistence  JPA Adapter                                    <- port.out 구현
+  ├─ out.messaging    Kafka Publisher, 발행 메시지                    <- port.out 구현
+  └─ out.client       REST Client Adapter                            <- port.out 구현
 ```
 
-도메인 규칙은 Aggregate 안에 두고, 애플리케이션 서비스는 유스케이스를 조율만 합니다.
-다른 Bounded Context는 도메인 객체가 아니라 Port로만 의존하고, infrastructure Adapter가 그 Port를 구현합니다.
+의존 방향은 항상 `adapter -> application -> domain` 입니다.
+`domain`과 `application`은 `adapter`(JPA/Kafka/REST/Spring MVC)를 알지 못하고, 어댑터가 포트를 구현/호출합니다.
+다른 Bounded Context는 도메인 객체가 아니라 Outbound Port로만 의존합니다.
 
 예시 (Order Service):
 
 ```text
 com.example.order
-├── presentation
-│   └── OrderController
-├── application
-│   ├── service.OrderApplicationService
-│   └── port.ProductCatalogPort
 ├── domain
-│   ├── model.Order (Aggregate Root)
-│   ├── model.OrderLine / Money / ProductSnapshot (VO)
+│   ├── model.Order (Aggregate Root) / OrderLine / Money / ProductSnapshot
 │   ├── event.OrderPlaced / OrderCancelled
-│   ├── service.PlaceOrderService
-│   └── repository.OrderRepository
-└── infrastructure
-    ├── persistence.OrderRepositoryAdapter
-    ├── client.ProductCatalogAdapter
-    └── event.KafkaDomainEventPublisher / messaging listeners
+│   ├── service.PlaceOrderService        (순수 도메인 규칙, 저장/발행은 하지 않음)
+│   └── exception.*
+├── application
+│   ├── port.in.OrderUseCase
+│   ├── port.out.OrderRepositoryPort / OrderEventPublisherPort / ProductCatalogPort
+│   ├── service.OrderApplicationService
+│   └── dto.CreateOrderCommand / OrderResponse
+├── adapter
+│   ├── in.web.OrderWebAdapter (+ dto, exception)
+│   ├── in.messaging.OrderKafkaListener (+ Payment*/Stock* 메시지)
+│   ├── out.persistence.OrderPersistenceAdapter / OrderJpaRepository
+│   ├── out.messaging.KafkaOrderEventPublisher (+ OrderPlaced/Cancelled 메시지)
+│   └── out.client.ProductCatalogAdapter
+└── config   KafkaTopicConfig / RestClientConfig / DomainConfig
 ```
+
+Product / Payment Service도 같은 규칙입니다.
+
+| 서비스 | in.web | in.messaging | out.persistence | out.messaging |
+|--------|--------|--------------|-----------------|---------------|
+| order | OrderWebAdapter | OrderKafkaListener | OrderPersistenceAdapter | KafkaOrderEventPublisher |
+| product | ProductWebAdapter | ProductKafkaListener | ProductPersistenceAdapter | KafkaStockEventPublisher |
+| payment | PaymentWebAdapter | PaymentKafkaListener | PaymentPersistenceAdapter | KafkaPaymentEventPublisher |
+
+Product/Payment의 메시징 유스케이스(`OrderEventUseCase` / `OrderEventService`)는 트랜잭션 밖에서 처리 결과 이벤트(성공/실패)를 Outbound Port로 발행합니다.
 
 ### 핵심 도메인 모델
 
@@ -94,7 +115,7 @@ com.example.order
 - `OrderLine`: Aggregate 내부 라인. 루트를 통해서만 생성됩니다.
 - `Money`: 금액 VO. 음수/통화 규칙을 생성 시점에 강제합니다.
 - `ProductSnapshot`: 상품 스냅샷 VO. 다른 컨텍스트의 상품을 주문 시점에만 보관합니다.
-- `PlaceOrderService`: 도메인 서비스. Aggregate를 조립하고 `OrderPlaced` 이벤트를 발행합니다.
+- `PlaceOrderService`: 도메인 서비스. Aggregate 조립 규칙만 담당하며, 저장과 `OrderPlaced` 발행은 Application Service가 Outbound Port로 수행합니다.
 - `Product` + `Stock` + `Money`: 상품 Aggregate Root와 재고/가격 VO.
 - `Payment` + `Money`: 결제 Aggregate Root. 승인/취소 상태 전이를 캡슐화합니다.
 
@@ -256,7 +277,7 @@ POST http://localhost:8080/api/orders/1/cancel
 
 따라서 하나의 거대한 주문 서비스 안에 모두 넣기보다 독립적인 Bounded Context로 분리하는 것이 적절합니다.
 
-도메인 로직은 Controller가 아니라 Aggregate에 있습니다. 다른 서비스 호출은 infrastructure Adapter가 Port를 구현하므로, 도메인은 REST/JPA를 알지 않습니다.
+도메인 로직은 Controller가 아니라 Aggregate에 있습니다. 다른 서비스 호출은 adapter.out이 Outbound Port를 구현하므로, 도메인은 REST/JPA를 알지 않습니다.
 
 ## 8. 추가 발전 방향
 
@@ -267,4 +288,4 @@ POST http://localhost:8080/api/orders/1/cancel
 
 ## 9. 제출 시 설명할 핵심
 
-> "서비스를 기술 기준으로 나눈 것이 아니라 도메인의 책임과 데이터 소유권을 기준으로 Bounded Context를 나눴습니다. Order는 주문의 생명주기를 책임지고 Product는 상품과 재고를, Payment는 결제 생명주기를 책임집니다. 각 서비스는 자신의 데이터를 소유하며 다른 서비스의 DB에 직접 접근하지 않습니다. 비즈니스 규칙은 Aggregate에 두고, 외부 시스템 의존은 Port/Adapter로 격리했습니다."
+> "서비스를 기술 기준으로 나눈 것이 아니라 도메인의 책임과 데이터 소유권을 기준으로 Bounded Context를 나눴습니다. Order는 주문의 생명주기를 책임지고 Product는 상품과 재고를, Payment는 결제 생명주기를 책임집니다. 각 서비스는 자신의 데이터를 소유하며 다른 서비스의 DB에 직접 접근하지 않습니다. 비즈니스 규칙은 Aggregate에 두고, 외부 시스템 의존은 in/out Port와 Adapter로 격리했습니다."
