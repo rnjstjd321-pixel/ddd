@@ -26,14 +26,14 @@ public class PaymentKafkaListener {
     @KafkaListener(topics = "${app.kafka.topics.stock-deducted}", groupId = "payment-service")
     public void onStockDeducted(String payload) throws Exception {
         StockDeductedMessage message = objectMapper.readValue(payload, StockDeductedMessage.class);
-        log.info("Received stock.deducted orderId={}", message.orderId());
+        log.info("Received stock.deducted eventId={} orderId={}", message.eventId(), message.orderId());
         orderEventUseCase.onStockDeducted(message.orderId(), message.amount());
     }
 
     @KafkaListener(topics = "${app.kafka.topics.order-cancelled}", groupId = "payment-service")
     public void onOrderCancelled(String payload) throws Exception {
         OrderCancelledMessage message = objectMapper.readValue(payload, OrderCancelledMessage.class);
-        log.info("Received order.cancelled orderId={} wasPaid={}", message.orderId(), message.wasPaid());
+        log.info("Received order.cancelled eventId={} orderId={} wasPaid={}", message.eventId(), message.orderId(), message.wasPaid());
         orderEventUseCase.onOrderCancelled(message.orderId(), message.wasPaid());
     }
 }

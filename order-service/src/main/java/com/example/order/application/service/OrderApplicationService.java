@@ -74,6 +74,11 @@ public class OrderApplicationService implements OrderUseCase {
     @Override
     public void markOrderPaid(Long orderId) {
         Order order = findOrder(orderId);
+        if (order.getStatus() == OrderStatus.CANCELLED) {
+            // 취소된 주문에 결제 승인이 뒤늦게 도착: 결제 취소(보상)를 다시 요청한다. 받는 쪽은 멱등하다.
+            domainEventPublisher.publish(order.cancelledEvent(true));
+            return;
+        }
         if (order.getStatus() != OrderStatus.CREATED) {
             return;
         }

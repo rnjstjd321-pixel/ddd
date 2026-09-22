@@ -7,9 +7,9 @@ import com.example.product.application.dto.OrderPlacedCommand;
  * Order Context에서 넘어온 이벤트(주문 생성/취소)를 처리하는 계약이다.
  */
 public interface OrderEventUseCase {
-    /** 재고를 차감하고, 성공/실패 결과를 Outbound Port로 알린다. */
+    /** 재고를 차감하고, 성공/실패 결과를 Outbound Port로 알린다. 중복 이벤트에도 안전하다. */
     void onOrderPlaced(OrderPlacedCommand command);
 
-    /** 주문 취소에 따라 재고를 복구한다. */
-    void onOrderCancelled(Long productId, int quantity);
+    /** 주문 취소에 따라 재고를 복구한다(보상). 중복/역순 이벤트에도 한 번만 복구한다. */
+    void onOrderCancelled(Long orderId, Long productId, int quantity);
 }

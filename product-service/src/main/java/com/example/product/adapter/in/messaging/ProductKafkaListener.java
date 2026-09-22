@@ -27,7 +27,7 @@ public class ProductKafkaListener {
     @KafkaListener(topics = "${app.kafka.topics.order-placed}", groupId = "product-service")
     public void onOrderPlaced(String payload) throws Exception {
         OrderPlacedMessage message = objectMapper.readValue(payload, OrderPlacedMessage.class);
-        log.info("Received order.placed orderId={} productId={}", message.orderId(), message.productId());
+        log.info("Received order.placed eventId={} orderId={} productId={}", message.eventId(), message.orderId(), message.productId());
         orderEventUseCase.onOrderPlaced(new OrderPlacedCommand(
                 message.orderId(),
                 message.productId(),
@@ -40,7 +40,7 @@ public class ProductKafkaListener {
     @KafkaListener(topics = "${app.kafka.topics.order-cancelled}", groupId = "product-service")
     public void onOrderCancelled(String payload) throws Exception {
         OrderCancelledMessage message = objectMapper.readValue(payload, OrderCancelledMessage.class);
-        log.info("Received order.cancelled orderId={} productId={}", message.orderId(), message.productId());
-        orderEventUseCase.onOrderCancelled(message.productId(), message.quantity());
+        log.info("Received order.cancelled eventId={} orderId={} productId={}", message.eventId(), message.orderId(), message.productId());
+        orderEventUseCase.onOrderCancelled(message.orderId(), message.productId(), message.quantity());
     }
 }

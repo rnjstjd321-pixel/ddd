@@ -134,44 +134,55 @@ Product/Payment의 메시징 유스케이스(`OrderEventUseCase` / `OrderEventSe
 
 따라서 상품명이 변경되더라도 과거 주문의 상품명/가격이 변하지 않습니다.
 
-## 4. 주문 생성 흐름
+## 4. Event-driven + Saga (Choreography)
+
+서비스 간 협력은 Kafka 이벤트로만 이루어지며, **중앙 조율자(Orchestrator) 없이** 각 서비스가 이벤트를 구독해 자기 로컬 트랜잭션을 수행하고 결과 이벤트를 발행합니다.
+Kafka는 헥사고날의 in/out 어댑터로 붙습니다: 구독은 `adapter.in.messaging`, 발행은 `adapter.out.messaging`이 담당하고, 서비스 내부는 `port.in` / `port.out`만 압니다.
 
 ```text
-Client
-  |
-  v
-Order Application Service
-  |
-  | 1. 상품 조회 (동기 REST)
-  v
-Product Context
-  |
-  | 2. Order 저장(CREATED) + order.placed 발행
-  v
-Kafka
-  |
-  | 3. 재고 차감 → stock.deducted
-  v
-Product Context
-  |
-  | 4. 결제 승인 → payment.approved
-  v
-Payment Context
-  |
-  | 5. Order.markPaid()
-  v
-Order -> PAID
+Order    POST /api/orders  → Order(CREATED) 저장 ─▶ order.placed
+Product  order.placed      → 재고 차감 + StockReservation 기록 ─▶ stock.deducted  (실패: stock.deduct.failed)
+Payment  stock.deducted    → 결제 승인 ─▶ payment.approved                         (실패: payment.failed)
+Order    payment.approved  → Order.markPaid() → PAID
 ```
 
-주문 생성 API는 `CREATED` 상태로 바로 응답하고, 결제 완료는 Kafka를 통해 비동기로 `PAID`로 반영됩니다.
-조회(`GET /api/orders/{id}`)로 최종 상태를 확인하면 됩니다.
+주문 생성 API는 `CREATED`로 바로 응답하고, 최종 상태는 이벤트를 통해 수렴합니다(Eventual Consistency).
 
-Kafka 토픽:
+| 서비스 | 구독(in.messaging) | 발행(out.messaging) |
+|--------|-------------------|---------------------|
+| order | payment.approved, payment.failed, stock.deduct.failed | order.placed, order.cancelled |
+| product | order.placed, order.cancelled | stock.deducted, stock.deduct.failed |
+| payment | stock.deducted, order.cancelled | payment.approved, payment.failed |
+
+### 보상(Compensation)
+
+| 상황 | 반응 |
+|------|------|
+| `stock.deduct.failed` | Order가 주문을 `CANCELLED`로 변경 (되돌릴 재고 없음) |
+| `payment.failed` | Order가 주문을 `CANCELLED`로 변경하고 `order.cancelled` 발행 → Product가 재고 복구 |
+| 사용자 주문 취소 | Order가 `order.cancelled` 발행 → Product 재고 복구, 결제됐다면(`wasPaid`) Payment가 결제 취소 |
+| 취소된 주문에 `payment.approved`가 뒤늦게 도착 | Order가 `order.cancelled(wasPaid=true)`를 다시 발행 → Payment가 결제 취소 |
+
+### 멱등성 / 순서 뒤바뀜 대응
+
+토픽이 달라 `order.placed`와 `order.cancelled`의 도착 순서는 보장되지 않고, Kafka는 중복 전달이 가능합니다.
+
+- Product: `stock_reservations`(PK = orderId)에 주문 단위 차감 기록을 남깁니다. 같은 주문은 재고를 한 번만 차감/복구하고, 차감 전에 취소가 먼저 오면 `RELEASED` 표식만 남겨 이후 차감을 막습니다.
+- Payment: `orderId` 기준으로 이미 결제가 있으면 새로 승인하지 않고, 이미 취소된 결제의 재취소는 무시합니다.
+- Order: 상태 기반으로 처리하므로 이미 `PAID`/`CANCELLED`인 주문에 온 중복 이벤트는 무시합니다.
+- 재고 변경은 `SELECT ... FOR UPDATE`(비관적 락)로 직렬화해 동시 차감 시 갱신 유실을 막습니다.
+- 모든 이벤트에는 `eventId`(UUID)가 있고 수신 로그에 함께 남습니다.
+
+### Kafka 토픽
+
 - `order.placed` / `order.cancelled`
 - `stock.deducted` / `stock.deduct.failed`
 - `payment.approved` / `payment.failed`
 
-실제 운영 환경에서는 Outbox Pattern과 멱등 소비를 함께 적용하는 것이 좋습니다.
+### 알려진 한계
+
+- DB 저장과 Kafka 발행이 하나의 트랜잭션이 아닙니다(커밋 후 발행). 운영에서는 Transactional Outbox와 재시도/DLQ를 함께 적용해야 합니다.
+- 상품 조회(`GET /api/products/{id}`)는 동기 REST입니다.
 
 ## 5. 실행
 
@@ -284,7 +295,7 @@ POST http://localhost:8080/api/orders/1/cancel
 운영 수준으로 발전시킨다면 다음을 적용할 수 있습니다.
 
 1. REST 동기 호출 의존성 감소 (상품 조회만 REST, 재고/결제는 Kafka)
-2. Saga Pattern 및 보상 트랜잭션 고도화
+2. Transactional Outbox, 재시도/DLQ 적용으로 이벤트 유실 방지
 
 ## 9. 제출 시 설명할 핵심
 

@@ -26,21 +26,21 @@ public class OrderKafkaListener {
     @KafkaListener(topics = "${app.kafka.topics.payment-approved}", groupId = "order-service")
     public void onPaymentApproved(String payload) throws Exception {
         PaymentApprovedMessage message = objectMapper.readValue(payload, PaymentApprovedMessage.class);
-        log.info("Received payment.approved orderId={}", message.orderId());
+        log.info("Received payment.approved eventId={} orderId={}", message.eventId(), message.orderId());
         orderApplicationService.markOrderPaid(message.orderId());
     }
 
     @KafkaListener(topics = "${app.kafka.topics.payment-failed}", groupId = "order-service")
     public void onPaymentFailed(String payload) throws Exception {
         PaymentFailedMessage message = objectMapper.readValue(payload, PaymentFailedMessage.class);
-        log.warn("Received payment.failed orderId={} reason={}", message.orderId(), message.reason());
+        log.warn("Received payment.failed eventId={} orderId={} reason={}", message.eventId(), message.orderId(), message.reason());
         orderApplicationService.failOrderAfterPaymentFailure(message.orderId());
     }
 
     @KafkaListener(topics = "${app.kafka.topics.stock-deduct-failed}", groupId = "order-service")
     public void onStockDeductFailed(String payload) throws Exception {
         StockDeductFailedMessage message = objectMapper.readValue(payload, StockDeductFailedMessage.class);
-        log.warn("Received stock.deduct.failed orderId={} reason={}", message.orderId(), message.reason());
+        log.warn("Received stock.deduct.failed eventId={} orderId={} reason={}", message.eventId(), message.orderId(), message.reason());
         orderApplicationService.failOrderAfterStockFailure(message.orderId());
     }
 }
