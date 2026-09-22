@@ -3,7 +3,6 @@ build/
 **/build/
 .idea/
 *.iml
-out/
 
 # Eclipse/VSCode build output
 bin/
